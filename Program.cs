@@ -6,42 +6,45 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 
-
-namespace ConsoleApp2
+//variant 2
+namespace Lab1
 {
     class Program
     {
-        private static string nick;
-        private static EndPoint remotePoint;
-        private static readonly Socket Socket = new(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        private static string _nick;
+        private static EndPoint _remotePoint;
+        private static readonly Socket Socket = new (AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         private static readonly List<string> Messages = new();
         private static Guid id;
         private static Guid guestId;
-        private const char Separator = '|';
-
-
+        private const char SeparatorStick= '|';
+        private const char Slash= '/';
+        
+    
         private static void StartPage()
         {
             try
             {
-                Console.WriteLine("Your nickname?");
-                nick = Console.ReadLine();
+                Console.Clear();
+                Console.WriteLine("Enter your nickname!");
+                _nick = Console.ReadLine();
+                Console.Clear();
+                Console.WriteLine("Hello, " + _nick);
                 Console.WriteLine("Enter your port");
                 var myPort = Convert.ToInt32(Console.ReadLine());
-                Console.WriteLine("Enter ip of your contact");
+                Console.WriteLine("Enter ip of your companion");
                 var ip = Console.ReadLine();
-                Console.WriteLine("Enter port of your contact");
+                Console.WriteLine("Enter port of your companion");
                 var port = Convert.ToInt32(Console.ReadLine());
                 Console.WriteLine("Do u already have your id? Y/any other");
-                var key = Console.ReadKey().KeyChar;
-                if (key == 'Y'||key=='y')
+                if (Console.ReadLine() == "Y")
                 {
-                    Console.WriteLine("\nWrite your id to recover");
+                    Console.WriteLine("Write your id to recover");
                     try
                     {
                         id = new Guid(Console.ReadLine());
                     }
-                    catch (Exception ex)
+                    catch(Exception ex)
                     {
                         Error(ex.Message);
                         StartPage();
@@ -50,13 +53,17 @@ namespace ConsoleApp2
                 else
                 {
                     id = Guid.NewGuid();
-                    Console.WriteLine($"\nYour generated id:\n{id}\nCopy it to recover message history in future.");
+                    Console.WriteLine($"Here is your generated id:\n{id}\nCopy it to paste then to recover message history.");
+                    Console.ReadKey();
+                    Console.WriteLine("Last chance to copy");
                     Console.ReadKey();
                 }
                 Socket.Bind(new IPEndPoint(IPAddress.Parse("127.0.0.1"), myPort));
-                remotePoint = new IPEndPoint(IPAddress.Parse(ip), port);
-
-
+                _remotePoint = new IPEndPoint(IPAddress.Parse(ip), port);
+                
+                Console.WriteLine();
+                Console.Clear();
+                
             }
             catch
             {
@@ -67,23 +74,33 @@ namespace ConsoleApp2
         }
 
         private static void ReceiveMessages()
-        {
+        { 
             try
             {
                 while (true)
                 {
-                    StringBuilder value = new();
+                    StringBuilder value = new ();
                     var data = new byte[256];
                     do
                     {
-                        var bytes = Socket.ReceiveFrom(data, ref remotePoint);
+                        var bytes = Socket.ReceiveFrom(data, ref _remotePoint);
                         value.Append(Encoding.Unicode.GetString(data, 0, bytes));
                     }
                     while (Socket.Available > 0);
                     var temp = "";
+                    switch (value[0])
+                    {
+                        case SeparatorStick:
+                            RecoverMessages(value.ToString());
+                            continue;
+                        case Slash:
+                            SendAllMessages();
+                            continue;
+                    }
+
                     for (var i = 0; i < value.Length; i++)
                     {
-                        if (value[i] != Separator)
+                        if (value[i] != SeparatorStick)
                         {
                             temp += value[i];
                         }
@@ -96,9 +113,9 @@ namespace ConsoleApp2
                         }
                     }
                 }
-
+            
             }
-            catch (Exception ex)
+            catch(Exception ex)
             {
                 Error(ex.Message);
             }
@@ -109,7 +126,13 @@ namespace ConsoleApp2
             while (true)
             {
                 var messageText = Console.ReadLine();
-                var message = nick + ": " + messageText;
+                if (messageText == "/recover")
+                {
+                    var recoverAssign = Encoding.Unicode.GetBytes(Slash + id.ToString());
+                    Socket.SendTo(recoverAssign, _remotePoint);
+                    continue;
+                }
+                var message = _nick + ": " + messageText;
                 if (guestId == default)
                 {
                     Messages.Add(message);
@@ -119,10 +142,16 @@ namespace ConsoleApp2
                     AddMessage(guestId, message);
                 }
                 DisplayMessageHistory();
-                var data = Encoding.Unicode.GetBytes(id + Separator.ToString() + message);
-                Socket.SendTo(data, remotePoint);
-                Thread.Sleep(200);
+                var data = Encoding.Unicode.GetBytes(id + SeparatorStick.ToString() + message);
+                Socket.SendTo(data, _remotePoint);
+                Thread.Sleep(500);
             }
+        }
+
+        private static void SendAllMessages()
+        {
+            var data = Encoding.Unicode.GetBytes( SeparatorStick.ToString() + id + SeparatorStick.ToString() + File.ReadAllText(Environment.CurrentDirectory + $"/{id}-{guestId}.txt"));
+            Socket.SendTo(data, _remotePoint);
         }
 
         private static void Error(string errorMessage)
@@ -148,7 +177,7 @@ namespace ConsoleApp2
             {
                 foreach (var mes in Messages)
                 {
-                    AddMessage(guestId, mes);
+                   AddMessage(guestId, mes); 
                 }
                 Messages.Clear();
             }
@@ -161,9 +190,33 @@ namespace ConsoleApp2
             {
                 Error("Fail in reading history");
             }
-
+            
         }
 
+        private static void RecoverMessages(string text)
+        {
+            string idRecover = "";
+            for (int i = 1; i < text.Length; i++)
+            {
+                if (text[i] == SeparatorStick)
+                {
+                    text = text.Remove(0, i);
+                    break;
+                }
+                idRecover += text[i];
+            }
+
+            string temp = "";
+            for (int i = 0; i <text.Length; i++)
+            {
+                if (text[i] == '\n')
+                {
+                    AddMessage(new Guid(idRecover),temp);
+                    continue;
+                }
+                temp += text[i];
+            }
+        }
         static void AddMessage(Guid guestId, string message)
         {
             File.AppendAllText(Environment.CurrentDirectory + $"/{id}-{guestId}.txt", message + Environment.NewLine);
@@ -172,9 +225,9 @@ namespace ConsoleApp2
         static void Main(string[] args)
         {
             StartPage();
-            Thread receive = new(ReceiveMessages);
+            Thread receive = new (ReceiveMessages);
             receive.Start();
-            Thread send = new(SendMessage);
+            Thread send = new (SendMessage);
             send.Start();
         }
     }
