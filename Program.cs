@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -13,14 +13,14 @@ namespace Lab1
     {
         private static string _nick;
         private static EndPoint _remotePoint;
-        private static readonly Socket Socket = new (AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        private static readonly List<string> Messages = new();
-        private static Guid id;
-        private static Guid guestId;
-        private const char SeparatorStick= '|';
-        private const char Slash= '/';
-        
-    
+        private static readonly Socket Socket = new(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        private static string id;
+        private static string guestId;
+        private const char SeparatorStick = '|';
+        private static string _ip;
+        private static string _port;
+        private static Dictionary<string, List<string>> _messagesHistory = new();
+
         private static void StartPage()
         {
             try
@@ -33,18 +33,18 @@ namespace Lab1
                 Console.WriteLine("Enter your port");
                 var myPort = Convert.ToInt32(Console.ReadLine());
                 Console.WriteLine("Enter ip of your companion");
-                var ip = Console.ReadLine();
+                _ip = Console.ReadLine();
                 Console.WriteLine("Enter port of your companion");
-                var port = Convert.ToInt32(Console.ReadLine());
+                _port = Console.ReadLine();
                 Console.WriteLine("Do u already have your id? Y/any other");
                 if (Console.ReadLine() == "Y")
                 {
-                    Console.WriteLine("Write your id to recover");
+                    Console.WriteLine("Write your id");
                     try
                     {
-                        id = new Guid(Console.ReadLine());
+                        id = Console.ReadLine();
                     }
-                    catch(Exception ex)
+                    catch (Exception ex)
                     {
                         Error(ex.Message);
                         StartPage();
@@ -52,18 +52,18 @@ namespace Lab1
                 }
                 else
                 {
-                    id = Guid.NewGuid();
-                    Console.WriteLine($"Here is your generated id:\n{id}\nCopy it to paste then to recover message history.");
-                    Console.ReadKey();
-                    Console.WriteLine("Last chance to copy");
+                    id = Guid.NewGuid().ToString("N").Substring(0, 5);
+                    Console.WriteLine($"Here is your generated id:\n{id}");
                     Console.ReadKey();
                 }
+
                 Socket.Bind(new IPEndPoint(IPAddress.Parse("127.0.0.1"), myPort));
-                _remotePoint = new IPEndPoint(IPAddress.Parse(ip), port);
-                
+                _remotePoint = new IPEndPoint(IPAddress.Parse(_ip), int.Parse(_port));
+
+                var data = Encoding.Unicode.GetBytes($"|connected--" + id);
+                Socket.SendTo(data, _remotePoint);
                 Console.WriteLine();
                 Console.Clear();
-                
             }
             catch
             {
@@ -74,50 +74,68 @@ namespace Lab1
         }
 
         private static void ReceiveMessages()
-        { 
+        {
             try
             {
                 while (true)
                 {
-                    StringBuilder value = new ();
+                    StringBuilder value = new();
                     var data = new byte[256];
                     do
                     {
                         var bytes = Socket.ReceiveFrom(data, ref _remotePoint);
                         value.Append(Encoding.Unicode.GetString(data, 0, bytes));
-                    }
-                    while (Socket.Available > 0);
-                    var temp = "";
-                    switch (value[0])
+                    } while (Socket.Available > 0);
+
+                    if (!value.ToString().Contains("|"))
                     {
-                        case SeparatorStick:
-                            RecoverMessages(value.ToString());
-                            continue;
-                        case Slash:
-                            SendAllMessages();
-                            continue;
+                        guestId = value.ToString();
+                        _messagesHistory[guestId] = new List<string>();
                     }
 
-                    for (var i = 0; i < value.Length; i++)
+                    if (value.ToString().Split("--")[0] == "|connected" && value.ToString().Contains("|"))
                     {
-                        if (value[i] != SeparatorStick)
+                        if (_messagesHistory.ContainsKey(value.ToString().Split("--")[1])
+                            && _messagesHistory.Count != 0)
                         {
-                            temp += value[i];
+                            SendHistory();
                         }
                         else
                         {
-                            value.Remove(0, i + 1);
-                            guestId = new Guid(temp);
-                            AddMessage(new Guid(temp), value.ToString());
-                            DisplayMessageHistory();
+                            _messagesHistory[value.ToString().Split("--")[1]] = new List<string>();
+                            Console.Clear();
                         }
+
+                        guestId = value.ToString().Split("--")[1];
+                    }
+                    else if (value.ToString().Split("--")[0] != "|connected" && value.ToString().Contains("|"))
+                    {
+                        if (guestId == null)
+                        {
+                            var i = 0;
+                            while (value[i] != SeparatorStick)
+                            {
+                                guestId += value[i];
+                                i++;
+                            }
+                        }
+
+                        if (_messagesHistory.ContainsKey(guestId))
+                        {
+                            _messagesHistory[guestId].Add(value.ToString());
+                        }
+                        else
+                        {
+                            _messagesHistory[guestId] = new List<string>() {value.ToString()};
+                        }
+
+                        DisplayMessages();
                     }
                 }
-            
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
-                Error(ex.Message);
+                ReceiveMessages();
             }
         }
 
@@ -125,33 +143,22 @@ namespace Lab1
         {
             while (true)
             {
-                var messageText = Console.ReadLine();
-                if (messageText == "/recover")
+                if (guestId != null)
                 {
-                    var recoverAssign = Encoding.Unicode.GetBytes(Slash + id.ToString());
-                    Socket.SendTo(recoverAssign, _remotePoint);
-                    continue;
-                }
-                var message = _nick + ": " + messageText;
-                if (guestId == default)
-                {
-                    Messages.Add(message);
+                    var messageText = Console.ReadLine();
+                    var message = _nick + ": " + messageText;
+                    var data = Encoding.Unicode.GetBytes(id + SeparatorStick + message);
+                    Socket.SendTo(data, _remotePoint);
+                    _messagesHistory[$"{guestId}"].Add(id + SeparatorStick + message);
+                    DisplayMessages();
                 }
                 else
                 {
-                    AddMessage(guestId, message);
+                    Console.Clear();
+                    Console.WriteLine("Second user is not connected");
+                    Thread.Sleep(300);
                 }
-                DisplayMessageHistory();
-                var data = Encoding.Unicode.GetBytes(id + SeparatorStick.ToString() + message);
-                Socket.SendTo(data, _remotePoint);
-                Thread.Sleep(500);
             }
-        }
-
-        private static void SendAllMessages()
-        {
-            var data = Encoding.Unicode.GetBytes( SeparatorStick.ToString() + id + SeparatorStick.ToString() + File.ReadAllText(Environment.CurrentDirectory + $"/{id}-{guestId}.txt"));
-            Socket.SendTo(data, _remotePoint);
         }
 
         private static void Error(string errorMessage)
@@ -161,73 +168,45 @@ namespace Lab1
             Console.ResetColor();
         }
 
-        private static void DisplayMessageHistory()
+        private static void DisplayMessages()
         {
             Console.Clear();
-            if (guestId == default)
-            {
-                foreach (var mes in Messages)
-                {
-                    Console.WriteLine(mes);
-                }
-                return;
-            }
-
-            if (Messages.Count != 0)
-            {
-                foreach (var mes in Messages)
-                {
-                   AddMessage(guestId, mes); 
-                }
-                Messages.Clear();
-            }
+            Console.WriteLine("My id: " + id);
             try
             {
-                string text = System.IO.File.ReadAllText(Environment.CurrentDirectory + $"/{id}-{guestId}.txt");
-                Console.WriteLine(text);
+                foreach (var pair in _messagesHistory.Where(p => p.Key == guestId))
+                {
+                    foreach (var mes in pair.Value)
+                    {
+                        Console.WriteLine(mes.Split("|")[1]);
+                    }
+                }
             }
             catch
             {
-                Error("Fail in reading history");
-            }
-            
-        }
-
-        private static void RecoverMessages(string text)
-        {
-            string idRecover = "";
-            for (int i = 1; i < text.Length; i++)
-            {
-                if (text[i] == SeparatorStick)
-                {
-                    text = text.Remove(0, i);
-                    break;
-                }
-                idRecover += text[i];
-            }
-
-            string temp = "";
-            for (int i = 0; i <text.Length; i++)
-            {
-                if (text[i] == '\n')
-                {
-                    AddMessage(new Guid(idRecover),temp);
-                    continue;
-                }
-                temp += text[i];
+                Error("Fail");
             }
         }
-        static void AddMessage(Guid guestId, string message)
+
+        private static void SendHistory()
         {
-            File.AppendAllText(Environment.CurrentDirectory + $"/{id}-{guestId}.txt", message + Environment.NewLine);
+            Socket.SendTo(Encoding.Unicode.GetBytes(id), _remotePoint);
+            foreach (var pair in _messagesHistory.Where(p => p.Key == guestId))
+            {
+                foreach (var data in pair.Value.Select(mes => Encoding.Unicode.GetBytes(mes)))
+                {
+                    Socket.SendTo(data, _remotePoint);
+                    Thread.Sleep(50);
+                }
+            }
         }
 
         static void Main(string[] args)
         {
             StartPage();
-            Thread receive = new (ReceiveMessages);
+            Thread receive = new(ReceiveMessages);
             receive.Start();
-            Thread send = new (SendMessage);
+            Thread send = new(SendMessage);
             send.Start();
         }
     }
