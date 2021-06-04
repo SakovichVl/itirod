@@ -15,12 +15,11 @@ namespace ChatViaUDP
         private static int remotePort;
         private static IPAddress remoteIp;
         private static string userName;
-        private static Dictionary<string, List<string>> history = new Dictionary<string, List<string>>();
+        private static Guid Id;
+        private static Dictionary<Guid, List<string>> history = new Dictionary<Guid, List<string>>();
 
         static void Main(string[] args)
         {
-            Console.WriteLine("Enter local ip:");
-            var localIp = Console.ReadLine();
             Console.WriteLine("Enter local port:");
             localPort = Convert.ToInt32(Console.ReadLine());
             Console.WriteLine("Enter remote ip:");
@@ -29,9 +28,9 @@ namespace ChatViaUDP
             remotePort = Convert.ToInt32(Console.ReadLine());
             Console.WriteLine("Enter your username:");
             userName = Console.ReadLine();
-
-            SendMessage($"connected~{localIp}{localPort}", true);
-            history.Add($"{remoteIp}{remotePort}", new List<string>());
+            Id = Guid.NewGuid();
+            SendMessage($"connected~{Id}", true);
+            history.Add(Id, new List<string>());
 
             var listenThread = new Thread(ListenMessage);
             listenThread.Start();
@@ -39,7 +38,7 @@ namespace ChatViaUDP
             while (true)
             {
                 Console.Write(userName + ": ");
-                SendMessage($"{localIp}{localPort}~" + userName + ": " + Console.ReadLine());
+                SendMessage($"{Id.ToString()}~" + userName + ": " + Console.ReadLine());
             }
         }
 
@@ -55,7 +54,7 @@ namespace ChatViaUDP
                 var historyValue = message.Split("~")[1];
                 if (!isConnecting)
                 {
-                    history[$"{remoteIp}{remotePort}"].Add(historyValue);
+                    history[Id].Add(historyValue);
                 }
                 
             }
@@ -79,21 +78,22 @@ namespace ChatViaUDP
                 {
                     var receiveBytes = listener.Receive(ref remoteIpEndPoint);
                     var message = Encoding.UTF8.GetString(receiveBytes);
-                    if (message[0] == "connected")
+                    var messages = message.Split('~');
+                    if (messages[0] == "connected")
                     {
                         CheckConnection(message);
                     }
                     else
                     {
                         Console.WriteLine(message);
-                        var splitMess = message.Split("~");
-                        if (history.ContainsKey(splitMess[0]))
+                        var tempId = new Guid(messages[0]);
+                        if (history.ContainsKey(tempId))
                         {
-                            history[splitMess[0]].Add(message);
+                            history[tempId].Add(messages[1]);
                         }
                         else
                         {
-                            history.Add(splitMess[0], new List<string>() {message});
+                            history.Add(tempId, new List<string>() {messages[1]});
                         }
                     }
                 }
@@ -108,7 +108,7 @@ namespace ChatViaUDP
         {
             var items = message.Split("~");
 
-            foreach (var pair in history.Where(p => p.Key == items[1]))
+            foreach (var pair in history.Where(p => p.Key == new Guid(items[1])))
             {
                 foreach (var msg in pair.Value)
                 {
